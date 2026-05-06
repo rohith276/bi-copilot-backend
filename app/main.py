@@ -34,9 +34,16 @@ app = FastAPI(
 _allowed_origins = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "https://bicopilot.vercel.app",
+    "https://bi-copilot-frontend.vercel.app",
 ]
-if settings.FRONTEND_URL and settings.FRONTEND_URL not in _allowed_origins:
-    _allowed_origins.append(settings.FRONTEND_URL)
+
+if settings.FRONTEND_URL:
+    # Support comma-separated list of origins
+    extra_origins = [o.strip() for o in settings.FRONTEND_URL.split(",") if o.strip()]
+    for origin in extra_origins:
+        if origin not in _allowed_origins:
+            _allowed_origins.append(origin)
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
