@@ -1,0 +1,17 @@
+{
+    "include": [
+        "app"
+    ],
+    "venv": "venv",
+    "venvPath": ".",
+    "pythonVersion": "3.10",
+    "pythonPlatform": "Windows",
+    "executionEnvironments": [
+        {
+            "root": ".",
+            "extraPaths": [
+                "."
+            ]
+        }
+    ]
+}
