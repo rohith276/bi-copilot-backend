@@ -67,35 +67,7 @@ def process_nl_query(df: pd.DataFrame, nl_query: str) -> NLQueryResult:
                 pass
 
     schema_str = ", ".join(schema_info)
-        
-    client_args = {"api_key": api_key}
-    model_name = "gpt-4o-mini"
-    if api_key.startswith("sk-or-v1-"):
-        client_args["base_url"] = "https://openrouter.ai/api/v1"
-        model_name = "openai/gpt-4o-mini"
-        
-    client = OpenAI(**client_args)
 
-    # 1. Prepare schema description
-    schema_info = []
-    date_hints = []
-    
-    for col, dtype in df.dtypes.items():
-        schema_info.append(f"'{col}' ({dtype})")
-        
-        # Try to identify date columns and extract their temporal boundaries
-        if 'date' in str(col).lower() or pd.api.types.is_datetime64_any_dtype(df[col]):
-            try:
-                temp_dates = pd.to_datetime(df[col], errors='coerce')
-                min_date = temp_dates.min()
-                max_date = temp_dates.max()
-                if not pd.isna(min_date) and not pd.isna(max_date):
-                    # Format as standard YYYY-MM-DD strings
-                    date_hints.append(f"Column '{col}' spans from {min_date.strftime('%Y-%m-%d')} to {max_date.strftime('%Y-%m-%d')}")
-            except Exception:
-                pass
-
-    schema_str = ", ".join(schema_info)
     
     date_context_str = ""
     if date_hints:
