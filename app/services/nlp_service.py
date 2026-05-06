@@ -67,6 +67,35 @@ def process_nl_query(df: pd.DataFrame, nl_query: str) -> NLQueryResult:
                 pass
 
     schema_str = ", ".join(schema_info)
+        
+    client_args = {"api_key": api_key}
+    model_name = "gpt-4o-mini"
+    if api_key.startswith("sk-or-v1-"):
+        client_args["base_url"] = "https://openrouter.ai/api/v1"
+        model_name = "openai/gpt-4o-mini"
+        
+    client = OpenAI(**client_args)
+
+    # 1. Prepare schema description
+    schema_info = []
+    date_hints = []
+    
+    for col, dtype in df.dtypes.items():
+        schema_info.append(f"'{col}' ({dtype})")
+        
+        # Try to identify date columns and extract their temporal boundaries
+        if 'date' in str(col).lower() or pd.api.types.is_datetime64_any_dtype(df[col]):
+            try:
+                temp_dates = pd.to_datetime(df[col], errors='coerce')
+                min_date = temp_dates.min()
+                max_date = temp_dates.max()
+                if not pd.isna(min_date) and not pd.isna(max_date):
+                    # Format as standard YYYY-MM-DD strings
+                    date_hints.append(f"Column '{col}' spans from {min_date.strftime('%Y-%m-%d')} to {max_date.strftime('%Y-%m-%d')}")
+            except Exception:
+                pass
+
+    schema_str = ", ".join(schema_info)
     
     date_context_str = ""
     if date_hints:
@@ -81,7 +110,15 @@ def process_nl_query(df: pd.DataFrame, nl_query: str) -> NLQueryResult:
     {date_context_str}
 
     Write a SQLite SQL query to answer this question: "{nl_query}"
-    Return ONLY the SQL query, no markdown, no explanation. Ensure column names with spaces are wrapped in double quotes.
+    
+    CRITICAL SQL RULES for SQLite compatibility:
+    1. Standard Deviation: SQLite DOES NOT have `STDDEV`. To find anomalies (Z-scores), use this variance formula: `(SUM(x*x) - SUM(x)*SUM(x)/COUNT(x)) / (COUNT(x) - 1)`.
+    2. To detect high-value anomalies, you can filter for values greater than `(AVG(x) + 2 * SQRT(variance))`.
+    3. Column names with spaces MUST be wrapped in double quotes (e.g. "Order Date").
+    4. Strings must use single quotes (e.g. 'Technology').
+    5. Ensure all numeric outputs are rounded to 2 decimal places using `ROUND(val, 2)`.
+    
+    Return ONLY the SQL query, no markdown, no explanation.
     """
     
     response = client.chat.completions.create(
