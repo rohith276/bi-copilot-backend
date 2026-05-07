@@ -10,6 +10,8 @@ class ForecastResult(BaseModel):
     dates: List[str]
     values: List[float]
     trend: str
+    model_engine: Optional[str] = None
+    r2_score: Optional[float] = None
 
 class PredictionRequest(BaseModel):
     target_col: str
@@ -19,6 +21,7 @@ class PredictionResult(BaseModel):
     coefficients: Dict[str, float]
     intercept: float
     r2_score: float
+    model_engine: Optional[str] = None
 
 class RecommendationResults(BaseModel):
     product: str
