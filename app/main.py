@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from .api import datasets, analytics, auth
+from .api import datasets, analytics
 from .db.session import engine, Base
 from .core.config import settings
 from .core.logger import get_logger
@@ -74,7 +74,6 @@ app.add_middleware(
 # Include routers
 app.include_router(datasets.router)
 app.include_router(analytics.router)
-app.include_router(auth.router)
 
 @app.get("/")
 async def root():
