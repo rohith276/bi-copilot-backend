@@ -123,7 +123,7 @@ def delete_dataset(dataset_id: int, db: Session):
 def get_dataset_df(file_path: str, nrows: int = None):
     resolved_path = _resolve_dataset_path(file_path)
     if not resolved_path.exists():
-        raise FileNotFoundError(f"Dataset file not found: {resolved_path}")
+        raise HTTPException(status_code=404, detail=f"Dataset file missing from server storage: {resolved_path.name}")
 
     # Files are now strictly stored as pristine CSVs
     if resolved_path.suffix.lower() == ".csv":
