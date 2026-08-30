@@ -91,7 +91,7 @@ def predict_trend(df: pd.DataFrame, target_col: str, feature_cols: List[str]) ->
     AutoML prediction: Compares Linear, Ridge, Lasso, and RandomForest to find the best predictor.
     """
     try:
-        if LinearRegression is None:
+        if LinearRegression is None or RandomForestRegressor is None or Ridge is None or Lasso is None:
             return {"error": "ML dependencies missing."}
             
         data = df.copy()
@@ -144,15 +144,15 @@ def predict_trend(df: pd.DataFrame, target_col: str, feature_cols: List[str]) ->
         # Extract coefficients (only for linear models)
         coefs = {}
         if hasattr(best_model, 'coef_'):
-            coefs = {str(col): round(float(c), 4) for col, c in zip(X.columns, best_model.coef_)}
+            coefs = {col: round(float(c), 4) for col, c in zip(X.columns, best_model.coef_)}
         elif hasattr(best_model, 'feature_importances_'):
             # For RF, return importances instead
-            coefs = {str(col): round(float(c), 4) for col, c in zip(X.columns, best_model.feature_importances_)}
+            coefs = {col: round(float(c), 4) for col, c in zip(X.columns, best_model.feature_importances_)}
 
         return {
             "coefficients": coefs,
             "intercept": round(float(getattr(best_model, 'intercept_', 0)), 2),
-            "r2_score": round(float(best_score), 4),
+            "r2_score": round(best_score, 4),
             "model_engine": best_model_name
         }
     except Exception as e:
