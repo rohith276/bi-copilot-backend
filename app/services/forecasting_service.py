@@ -66,7 +66,7 @@ def forecast_sales(df: pd.DataFrame, date_col: str, value_col: str, periods: int
             forecast_values = [float(df_ts.iloc[-1])] * periods
         else:
             try:
-                forecast_values = best_fit.forecast(periods)
+                forecast_values = [float(v) for v in best_fit.forecast(periods)]
             except Exception as e_best:
                 from ..core.logger import get_logger
                 logger = get_logger(__name__)
@@ -78,8 +78,8 @@ def forecast_sales(df: pd.DataFrame, date_col: str, value_col: str, periods: int
         
         return {
             "dates": [d.strftime('%Y-%m-%d') for d in forecast_dates],
-            "values": [round(float(v), 2) for v in forecast_values],
-            "trend": "up" if forecast_values[-1] > df_ts.iloc[-1] else "down",
+            "values": [round(v, 2) for v in forecast_values],
+            "trend": "up" if forecast_values[-1] > float(df_ts.iloc[-1]) else "down",
             "model_engine": best_model_name,
             "r2_score": round(1 - (best_aic / 10000), 4) if best_aic != float('inf') else 0.0 # Heuristic for relative confidence
         }
