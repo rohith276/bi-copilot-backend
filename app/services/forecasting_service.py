@@ -65,7 +65,14 @@ def forecast_sales(df: pd.DataFrame, date_col: str, value_col: str, periods: int
             best_model_name = "Naive (Last Value)"
             forecast_values = [float(df_ts.iloc[-1])] * periods
         else:
-            forecast_values = best_fit.forecast(periods)
+            try:
+                forecast_values = best_fit.forecast(periods)
+            except Exception as e_best:
+                from ..core.logger import get_logger
+                logger = get_logger(__name__)
+                logger.warning(f"Statsmodels forecast failed: {e_best}. Falling back to Naive.")
+                best_model_name = "Naive (Fallback)"
+                forecast_values = [float(df_ts.iloc[-1])] * periods
 
         forecast_dates = [df_ts.index[-1] + timedelta(days=i+1) for i in range(periods)]
         
