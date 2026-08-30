@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+from typing import Dict, Any
 from ..core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -60,7 +61,7 @@ def get_column_stats(df: pd.DataFrame):
     stats = []
     for col in df_stats.columns:
         series = df_stats[col]
-        col_stats = {
+        col_stats: Dict[str, Any] = {
             "name": col,
             "type": str(series.dtype),
             "missing_values": int(series.isna().sum()),
@@ -84,6 +85,8 @@ def get_column_stats(df: pd.DataFrame):
             if not numeric_series.empty:
                 std_value = numeric_series.std()
                 skew_value = numeric_series.skew()
+                std_float = 0.0 if pd.isna(std_value) else float(std_value)
+                skew_float = 0.0 if pd.isna(skew_value) else float(skew_value)
                 try:
                     q1 = float(numeric_series.quantile(0.25))
                     q3 = float(numeric_series.quantile(0.75))
@@ -92,8 +95,8 @@ def get_column_stats(df: pd.DataFrame):
                         "max": round(float(numeric_series.max()), 2),
                         "mean": round(float(numeric_series.mean()), 2),
                         "median": round(float(numeric_series.median()), 2),
-                        "std": round(float(0 if pd.isna(std_value) else std_value), 2),
-                        "skewness": round(float(0 if pd.isna(skew_value) else skew_value), 2),
+                        "std": round(std_float, 2),
+                        "skewness": round(skew_float, 2),
                         "q1": round(q1, 2),
                         "q3": round(q3, 2),
                         "iqr": round(q3 - q1, 2),
