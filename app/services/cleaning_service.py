@@ -66,6 +66,19 @@ def get_column_stats(df: pd.DataFrame):
             "missing_values": int(series.isna().sum()),
             "unique_values": int(series.nunique(dropna=True))
         }
+        
+        is_numeric = pd.api.types.is_numeric_dtype(series)
+        is_datetime = pd.api.types.is_datetime64_any_dtype(series) or 'date' in str(col).lower()
+        
+        if is_datetime:
+            col_stats["bi_type"] = "datetime"
+        elif is_numeric:
+            if col_stats["unique_values"] < 15 or str(col).lower().endswith("id"):
+                col_stats["bi_type"] = "dimension"
+            else:
+                col_stats["bi_type"] = "metric"
+        else:
+            col_stats["bi_type"] = "dimension"
         if pd.api.types.is_numeric_dtype(series):
             numeric_series = pd.to_numeric(series, errors='coerce').dropna()
             if not numeric_series.empty:
