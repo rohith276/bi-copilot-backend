@@ -21,7 +21,7 @@ def basic_clean(df: pd.DataFrame) -> pd.DataFrame:
     # 2. Standardize Dates (Crucial for SQLite and AI Time Context)
     for col in df.columns:
         # Check if the column name implies a date or if pandas typed it as datetime
-        if 'date' in str(col).lower() or pd.api.types.is_datetime64_any_dtype(df[col]):
+        if 'date' in str(col).lower() or pd.api.types.is_datetime64_any_dtype(df[col]):  # type: ignore
             try:
                 # Attempt to parse mixed formats (like DD/MM/YYYY)
                 temp = pd.to_datetime(df[col], errors='coerce')
@@ -63,18 +63,18 @@ def get_column_stats(df: pd.DataFrame):
         series = df_stats[col]
         col_stats: Dict[str, Any] = {
             "name": col,
-            "type": str(series.dtype),
-            "missing_values": int(series.isna().sum()),
-            "unique_values": int(series.nunique(dropna=True))
+            "type": str(series.dtype),  # type: ignore
+            "missing_values": int(series.isna().sum()),  # type: ignore
+            "unique_values": int(series.nunique(dropna=True))  # type: ignore
         }
         
         is_numeric = pd.api.types.is_numeric_dtype(series)
-        is_datetime = pd.api.types.is_datetime64_any_dtype(series) or 'date' in str(col).lower()
+        is_datetime = pd.api.types.is_datetime64_any_dtype(series) or 'date' in str(col).lower()  # type: ignore
         
         if is_datetime:
             col_stats["bi_type"] = "datetime"
         elif is_numeric:
-            if col_stats["unique_values"] < 15 or str(col).lower().endswith("id"):
+            if col_stats["unique_values"] < 15 or str(col).lower().endswith("id"):  # type: ignore
                 col_stats["bi_type"] = "dimension"
             else:
                 col_stats["bi_type"] = "metric"
@@ -88,19 +88,19 @@ def get_column_stats(df: pd.DataFrame):
                 std_float = 0.0 if pd.isna(std_value) else float(std_value)  # type: ignore
                 skew_float = 0.0 if pd.isna(skew_value) else float(skew_value)  # type: ignore
                 try:
-                    q1 = float(numeric_series.quantile(0.25))
-                    q3 = float(numeric_series.quantile(0.75))
+                    q1 = float(numeric_series.quantile(0.25))  # type: ignore
+                    q3 = float(numeric_series.quantile(0.75))  # type: ignore
                     col_stats.update({
-                        "min": round(float(numeric_series.min()), 2),
-                        "max": round(float(numeric_series.max()), 2),
-                        "mean": round(float(numeric_series.mean()), 2),
-                        "median": round(float(numeric_series.median()), 2),
+                        "min": round(float(numeric_series.min()), 2),  # type: ignore
+                        "max": round(float(numeric_series.max()), 2),  # type: ignore
+                        "mean": round(float(numeric_series.mean()), 2),  # type: ignore
+                        "median": round(float(numeric_series.median()), 2),  # type: ignore
                         "std": round(std_float, 2),
                         "skewness": round(skew_float, 2),
                         "q1": round(q1, 2),
                         "q3": round(q3, 2),
                         "iqr": round(q3 - q1, 2),
-                        "zero_count": int((numeric_series == 0).sum()),
+                        "zero_count": int((numeric_series == 0).sum()),  # type: ignore
                     })
                 except Exception:
                     pass

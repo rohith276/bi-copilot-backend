@@ -1,6 +1,7 @@
 from pathlib import Path
 import pandas as pd
 from fastapi import UploadFile, HTTPException
+from typing import Optional
 from sqlalchemy.orm import Session
 from ..models.dataset import Dataset as DatasetModel
 from .ai_cleaning_service import generate_cleaning_recipe, apply_ai_cleaning
@@ -20,7 +21,7 @@ def _resolve_dataset_path(file_path: str | Path) -> Path:
         resolved = BACKEND_DIR / resolved
     return resolved
 
-def load_csv_with_fallback(file_path: str, nrows: int = None) -> pd.DataFrame:
+def load_csv_with_fallback(file_path: str, nrows: Optional[int] = None) -> pd.DataFrame:
     encodings = ['utf-8', 'iso-8859-1', 'cp1252', 'latin1']
     for enc in encodings:
         try:
@@ -108,7 +109,7 @@ def delete_dataset(dataset_id: int, db: Session):
         return False
     
     # Remove physical file if it exists
-    dataset_path = _resolve_dataset_path(db_dataset.file_path)
+    dataset_path = _resolve_dataset_path(str(db_dataset.file_path))
     if dataset_path.exists():
         try:
             dataset_path.unlink()
@@ -120,7 +121,7 @@ def delete_dataset(dataset_id: int, db: Session):
     db.commit()
     return True
 
-def get_dataset_df(file_path: str, nrows: int = None):
+def get_dataset_df(file_path: str, nrows: Optional[int] = None):
     resolved_path = _resolve_dataset_path(file_path)
     if not resolved_path.exists():
         raise HTTPException(status_code=404, detail=f"Dataset file missing from server storage: {resolved_path.name}")

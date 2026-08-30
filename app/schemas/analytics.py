@@ -1,5 +1,6 @@
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
+from .query import QueryResult
 
 class ForecastRequest(BaseModel):
     date_col: str
@@ -39,3 +40,12 @@ class AnomalyResult(BaseModel):
     deviation: str
     other_data: Dict[str, str]
 
+class VisualQueryRequest(BaseModel):
+    x_axis: str
+    y_axis: str
+    aggregate: str
+    filters: Optional[List[Dict[str, Any]]] = None
+
+class VisualQueryResult(BaseModel):
+    sql_query: str
+    result: QueryResult
