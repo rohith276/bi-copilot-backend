@@ -85,8 +85,8 @@ def get_column_stats(df: pd.DataFrame):
             if not numeric_series.empty:
                 std_value = numeric_series.std()
                 skew_value = numeric_series.skew()
-                std_float = 0.0 if pd.isna(std_value) else float(std_value)
-                skew_float = 0.0 if pd.isna(skew_value) else float(skew_value)
+                std_float = 0.0 if pd.isna(std_value) else float(std_value)  # type: ignore
+                skew_float = 0.0 if pd.isna(skew_value) else float(skew_value)  # type: ignore
                 try:
                     q1 = float(numeric_series.quantile(0.25))
                     q3 = float(numeric_series.quantile(0.75))
