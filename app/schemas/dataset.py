@@ -16,6 +16,14 @@ class Dataset(DatasetBase):
     created_at: datetime
     row_count: Optional[int]
     column_count: Optional[int]
+    source_type: Optional[str] = "file"
+    connection_string: Optional[str] = None
+    db_query: Optional[str] = None
 
     class Config:
         from_attributes = True
+
+class DBConnectRequest(BaseModel):
+    name: str
+    connection_string: str
+    query: str

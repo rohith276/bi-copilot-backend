@@ -5,8 +5,8 @@ import re
 import pandas as pd
 import numpy as np
 from openai import OpenAI
-from typing import List, Dict, Any
-from ..schemas.query import NLQueryResult, QueryResult
+from typing import List, Dict, Any, Optional
+from ..schemas.query import NLQueryResult, QueryResult, ConversationTurn
 from ..core.config import settings
 
 DISALLOWED_SQL_PATTERN = re.compile(
@@ -34,7 +34,7 @@ def _clean_generated_sql(sql_query: str) -> str:
     return cleaned_sql
 
 
-def process_nl_query(df: pd.DataFrame, nl_query: str) -> NLQueryResult:
+def process_nl_query(df: pd.DataFrame, nl_query: str, conversation_history: Optional[List[ConversationTurn]] = None, semantic_context: Optional[str] = None) -> NLQueryResult:
     api_key = settings.OPENAI_API_KEY or os.getenv("OPENAI_API_KEY")
     if not api_key:
         raise ValueError("OPENAI_API_KEY environment variable is not set. Please set it to use the AI features.")
@@ -68,6 +68,10 @@ def process_nl_query(df: pd.DataFrame, nl_query: str) -> NLQueryResult:
 
     schema_str = ", ".join(schema_info)
 
+    semantic_block = ""
+    if semantic_context:
+        semantic_block = f"\n\n{semantic_context}\n"
+
     
     date_context_str = ""
     if date_hints:
@@ -78,7 +82,7 @@ def process_nl_query(df: pd.DataFrame, nl_query: str) -> NLQueryResult:
     sql_prompt = f"""
     Given a SQLite table named 'dataset' with the following schema:
     {schema_str}
-    
+    {semantic_block}
     {date_context_str}
 
     Write a SQLite SQL query to answer this question: "{nl_query}"
@@ -93,12 +97,22 @@ def process_nl_query(df: pd.DataFrame, nl_query: str) -> NLQueryResult:
     Return ONLY the SQL query, no markdown, no explanation.
     """
     
-    response = client.chat.completions.create(
+    # Build conversation context for follow-up queries
+    messages = [
+        {"role": "system", "content": "You are a data analysis assistant that converts natural language to SQLite SQL query. When the user references prior questions (e.g. 'break that down', 'filter that', 'now show...'), use the conversation history to understand context and modify or build upon previous SQL queries."}
+    ]
+    
+    # Inject conversation history as prior turns
+    if conversation_history:
+        for turn in conversation_history[-5:]:  # Keep last 5 turns to stay within token limits
+            messages.append({"role": "user", "content": f"Question: {turn.question}"})
+            messages.append({"role": "assistant", "content": turn.sql})
+    
+    messages.append({"role": "user", "content": sql_prompt})
+    
+    response = client.chat.completions.create( # type: ignore
         model=model_name,
-        messages=[
-            {"role": "system", "content": "You are a data analysis assistant that converts natural language to SQLite SQL query."},
-            {"role": "user", "content": sql_prompt}
-        ],
+        messages=messages,
         temperature=0
     )
     sql_query = _clean_generated_sql(response.choices[0].message.content or "")
@@ -110,10 +124,40 @@ def process_nl_query(df: pd.DataFrame, nl_query: str) -> NLQueryResult:
     try:
         result_df = pd.read_sql(sql_query, conn)
     except Exception as e:
-        conn.close()
-        raise ValueError("Failed to execute the generated SQL against the dataset.") from e
+        # AI Query Debugger (#7) - Attempt to fix failed SQL once
+        error_msg = str(e)
+        try:
+            fix_prompt = f"""
+            The following SQL query failed to execute against the SQLite database:
+            
+            {sql_query}
+            
+            The error message was:
+            {error_msg}
+            
+            Please fix the SQL query so that it executes correctly. 
+            Remember SQLite limitations (e.g. no STDDEV, use double quotes for column names with spaces).
+            Return ONLY the fixed SQL query, no markdown, no explanation.
+            """
+            
+            fix_resp = client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": "You are a data analysis assistant that fixes SQL queries."},
+                    {"role": "user", "content": fix_prompt}
+                ],
+                temperature=0
+            )
+            sql_query = _clean_generated_sql(fix_resp.choices[0].message.content or "")
+            result_df = pd.read_sql(sql_query, conn)
+        except Exception as retry_e:
+            raise ValueError(f"Failed to execute the generated SQL even after AI debugging: {str(retry_e)}") from retry_e
     finally:
-        conn.close()
+        if 'conn' in locals():
+            try:
+                conn.close()
+            except:
+                pass
         
     # 4. Generate Insights and Chart Configuration
     # Just grab first few rows to send back for context
@@ -150,7 +194,8 @@ def process_nl_query(df: pd.DataFrame, nl_query: str) -> NLQueryResult:
         ],
         temperature=0.1
     )
-    raw_insight = insight_resp.choices[0].message.content.strip()
+    msg_content = insight_resp.choices[0].message.content
+    raw_insight = msg_content.strip() if msg_content else ""
     
     # Clean up JSON if LLM added markdown
     if raw_insight.startswith("```json"):
@@ -170,13 +215,13 @@ def process_nl_query(df: pd.DataFrame, nl_query: str) -> NLQueryResult:
     total_rows = len(result_df)
     
     # Handle NaN values and round floats for JSON serialization
-    for col in result_df.select_dtypes(include=[np.number]).columns:
+    for col in result_df.select_dtypes(include='number').columns:
         result_df[col] = result_df[col].apply(lambda x: round(float(x), 2) if pd.notna(x) else np.nan)
     result_df = result_df.replace({np.nan: None})
     
     res = QueryResult(
         columns=result_df.columns.tolist(),
-        data=result_df.to_dict(orient="records"),
+        data=result_df.to_dict(orient="records"), # type: ignore
         total_rows=total_rows
     )
     
@@ -222,7 +267,8 @@ def suggest_queries(df: pd.DataFrame) -> List[str]:
             ],
             temperature=0.7
         )
-        content = response.choices[0].message.content.strip()
+        msg_content = response.choices[0].message.content
+        content = msg_content.strip() if msg_content else ""
         if content.startswith("```json"):
             content = content.replace("```json", "").replace("```", "").strip()
         return json.loads(content)

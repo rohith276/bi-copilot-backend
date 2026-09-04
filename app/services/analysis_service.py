@@ -1,9 +1,40 @@
+import sqlite3
 import pandas as pd
 import numpy as np
 from typing import List, Dict, Any
 from ..schemas.query import QueryRequest, Filter, GroupBy
+from .nlp_service import _clean_generated_sql
+
+def execute_sql_query(df: pd.DataFrame, sql_query: str, limit: int = 100) -> Dict[str, Any]:
+    """Execute a read-only SQL query against an in-memory copy of the dataset."""
+    cleaned_sql = _clean_generated_sql(sql_query)
+
+    conn = sqlite3.connect(":memory:")
+    df.to_sql("dataset", conn, index=False)
+    try:
+        result_df = pd.read_sql(cleaned_sql, conn)
+    finally:
+        conn.close()
+
+    total_rows = len(result_df)
+    result_df = result_df.head(limit)
+
+    for col in result_df.select_dtypes(include='number').columns:
+        result_df[col] = result_df[col].apply(
+            lambda x: round(float(x), 2) if pd.notna(x) else np.nan
+        )
+
+    return {
+        "columns": result_df.columns.tolist(),
+        "data": result_df.replace({np.nan: None}).to_dict(orient="records"),
+        "total_rows": total_rows,
+    }
+
 
 def process_query(df: pd.DataFrame, request: QueryRequest) -> Dict[str, Any]:
+    if request.sql_query:
+        return execute_sql_query(df, request.sql_query, request.limit)
+
     processed_df: pd.DataFrame = df.copy()
 
     # 1. Apply Filters
@@ -24,6 +55,10 @@ def process_query(df: pd.DataFrame, request: QueryRequest) -> Dict[str, Any]:
                 processed_df = processed_df[processed_df[f.column] >= f.value]
             elif f.operator == "lte":
                 processed_df = processed_df[processed_df[f.column] <= f.value]
+            elif f.operator == "in":
+                # value should be a list of allowed values
+                allowed = f.value if isinstance(f.value, list) else [f.value]
+                processed_df = processed_df[processed_df[f.column].isin(allowed)]
             elif f.operator == "contains":
                 processed_df = processed_df[processed_df[f.column].astype(str).str.contains(str(f.value), case=False)]
 

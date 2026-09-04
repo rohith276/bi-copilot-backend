@@ -8,6 +8,8 @@ from .ai_cleaning_service import generate_cleaning_recipe, apply_ai_cleaning
 from ..core.config import settings
 from ..core.logger import get_logger
 import uuid
+import sqlalchemy as sa
+from sqlalchemy import exc as sa_exc
 
 logger = get_logger(__name__)
 
@@ -29,7 +31,55 @@ def load_csv_with_fallback(file_path: str, nrows: Optional[int] = None) -> pd.Da
         except UnicodeDecodeError:
             continue
     # If all fail, let pandas try its best with unicode_escape
+    # If all fail, let pandas try its best with unicode_escape
     return pd.read_csv(file_path, encoding='unicode_escape', sep=None, engine='python', nrows=nrows)
+
+async def import_from_database(name: str, connection_string: str, query: str, db: Session) -> DatasetModel:
+    """Connect to a database, run a query, and save the result as a local CSV dataset."""
+    try:
+        # Create engine and read data
+        engine = sa.create_engine(connection_string)
+        with engine.connect() as conn:
+            df = pd.read_sql(query, conn)
+            
+        if df.empty:
+            raise ValueError("The query returned no data.")
+            
+        # Save to local CSV
+        unique_filename = f"{uuid.uuid4()}.csv"
+        file_path = UPLOAD_DIR / unique_filename
+        df.to_csv(file_path, index=False)
+        
+        # Clean data using existing AI pipeline
+        recipe = generate_cleaning_recipe(df)
+        cleaned_df = apply_ai_cleaning(df, recipe)
+        cleaned_df.to_csv(file_path, index=False)
+        
+        row_count = len(cleaned_df)
+        column_count = len(cleaned_df.columns)
+        
+        db_dataset = DatasetModel(
+            filename=name,
+            file_path=str(file_path.name),
+            file_type="csv",
+            row_count=row_count,
+            column_count=column_count,
+            source_type="database",
+            connection_string=connection_string,
+            db_query=query
+        )
+        db.add(db_dataset)
+        db.commit()
+        db.refresh(db_dataset)
+        
+        return db_dataset
+        
+    except sa_exc.SQLAlchemyError as e:
+        logger.error(f"Database error: {str(e)}")
+        raise ValueError(f"Database connection or query failed: {str(e)}")
+    except Exception as e:
+        logger.error(f"Import error: {str(e)}")
+        raise ValueError(f"Failed to import data: {str(e)}")
 
 async def save_upload_file(upload_file: UploadFile, db: Session):
     if not upload_file.filename:

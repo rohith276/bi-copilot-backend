@@ -12,3 +12,8 @@ class Dataset(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     row_count = Column(Integer, nullable=True)
     column_count = Column(Integer, nullable=True)
+    
+    # DB Connector fields
+    source_type = Column(String, default="file") # 'file' or 'database'
+    connection_string = Column(String, nullable=True)
+    db_query = Column(String, nullable=True)

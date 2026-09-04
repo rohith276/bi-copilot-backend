@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from .api import datasets, analytics
+from .api import datasets, analytics, dashboards, exports, search
 from .db.session import engine, Base
 from .core.config import settings
 from .core.logger import get_logger
@@ -55,7 +55,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
     # Ensure CORS headers are present even on errors
     origin = request.headers.get("origin")
-    if origin in _allowed_origins:
+    if origin and origin in _allowed_origins:
         response.headers["Access-Control-Allow-Origin"] = origin
         response.headers["Access-Control-Allow-Credentials"] = "true"
     return response
@@ -74,6 +74,10 @@ app.add_middleware(
 # Include routers
 app.include_router(datasets.router)
 app.include_router(analytics.router)
+app.include_router(dashboards.router)
+app.include_router(dashboards.shared_router)
+app.include_router(exports.router)
+app.include_router(search.router)
 
 @app.get("/")
 async def root():

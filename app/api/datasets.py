@@ -2,9 +2,10 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 from typing import List, Dict, Any
 from ..db.session import get_db
-from ..schemas.dataset import Dataset
+from ..schemas.dataset import Dataset, DBConnectRequest
 from ..schemas.query import QueryRequest, QueryResult, NLQueryRequest, NLQueryResult
-from ..services import dataset_service, analysis_service, cleaning_service, nlp_service, sample_data_service
+from ..services import dataset_service, analysis_service, cleaning_service, nlp_service, sample_data_service, semantic_layer_service
+from ..schemas.semantic import CalculatedFieldCreate, CalculatedFieldOut, GenerateFormulaRequest, GenerateFormulaResponse
 
 router = APIRouter(prefix="/datasets", tags=["datasets"])
 
@@ -42,6 +43,21 @@ async def upload_dataset(file: UploadFile = File(...), db: Session = Depends(get
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Could not upload file: {str(e)}")
 
+@router.post("/connect-db", response_model=Dataset)
+async def connect_database(request: DBConnectRequest, db: Session = Depends(get_db)):
+    """Extract data from a database query and save as a dataset."""
+    try:
+        return await dataset_service.import_from_database(
+            name=request.name,
+            connection_string=request.connection_string,
+            query=request.query,
+            db=db
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database import failed: {str(e)}")
+
 @router.get("/", response_model=List[Dataset])
 def read_datasets(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     return dataset_service.get_datasets(db, skip=skip, limit=limit)
@@ -68,7 +84,7 @@ def delete_dataset(dataset_id: int, db: Session = Depends(get_db)):
 def get_dataset_preview(dataset_id: int, db: Session = Depends(get_db)):
     db_dataset = _get_dataset_or_404(dataset_id, db)
     # Optimization: Only load first 100 rows for preview
-    df = dataset_service.get_dataset_df(db_dataset.file_path, nrows=100)
+    df = dataset_service.get_dataset_df(str(db_dataset.file_path), nrows=1000)
     return analysis_service.process_query(df, QueryRequest(limit=10))
 
 @router.get("/{dataset_id}/stats")
@@ -77,29 +93,59 @@ def get_dataset_stats(dataset_id: int, db: Session = Depends(get_db)):
     
     # Optimization: Use sampling for massive datasets to prevent timeouts
     nrows = 100000 if db_dataset.row_count > 100000 else None
-    df = dataset_service.get_dataset_df(db_dataset.file_path, nrows=nrows)
+    df = dataset_service.get_dataset_df(str(db_dataset.file_path), nrows=nrows)
     
     return cleaning_service.get_column_stats(df)
 
 @router.post("/{dataset_id}/query", response_model=QueryResult)
 def query_dataset(dataset_id: int, request: QueryRequest, db: Session = Depends(get_db)):
     db_dataset = _get_dataset_or_404(dataset_id, db)
-    df = dataset_service.get_dataset_df(db_dataset.file_path)
+    df = dataset_service.get_dataset_df(str(db_dataset.file_path))
     return analysis_service.process_query(df, request)
 
 @router.post("/{dataset_id}/nl-query", response_model=NLQueryResult)
 def nl_query_dataset(dataset_id: int, request: NLQueryRequest, db: Session = Depends(get_db)):
     db_dataset = _get_dataset_or_404(dataset_id, db)
-    df = dataset_service.get_dataset_df(db_dataset.file_path)
+    df = dataset_service.get_dataset_df(str(db_dataset.file_path))
+    semantic_context = semantic_layer_service.format_for_prompt(dataset_id, db)
     try:
-        return nlp_service.process_nl_query(df, request.query)
+        return nlp_service.process_nl_query(
+            df, request.query, request.conversation_history, semantic_context
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to process NL query: {str(e)}")
 
+@router.get("/{dataset_id}/calculated-fields", response_model=List[CalculatedFieldOut])
+def get_calculated_fields(dataset_id: int, db: Session = Depends(get_db)):
+    _get_dataset_or_404(dataset_id, db)
+    return semantic_layer_service.get_metrics(dataset_id, db)
+
+@router.post("/{dataset_id}/calculated-fields", response_model=CalculatedFieldOut)
+def create_calculated_field(dataset_id: int, field: CalculatedFieldCreate, db: Session = Depends(get_db)):
+    _get_dataset_or_404(dataset_id, db)
+    return semantic_layer_service.create_metric(
+        dataset_id, field.name, field.expression, field.description, db
+    )
+
+@router.post("/{dataset_id}/calculated-fields/generate", response_model=GenerateFormulaResponse)
+def generate_calculated_field(dataset_id: int, request: GenerateFormulaRequest, db: Session = Depends(get_db)):
+    _get_dataset_or_404(dataset_id, db)
+    try:
+        formula = semantic_layer_service.generate_measure_formula(dataset_id, request.prompt, db)
+        return GenerateFormulaResponse(formula=formula)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate formula: {str(e)}")
+
+@router.delete("/{dataset_id}/calculated-fields/{field_id}")
+def delete_calculated_field(dataset_id: int, field_id: int, db: Session = Depends(get_db)):
+    if not semantic_layer_service.delete_metric(dataset_id, field_id, db):
+        raise HTTPException(status_code=404, detail="Calculated field not found")
+    return {"message": "Field deleted"}
+
 @router.get("/{dataset_id}/suggest-queries", response_model=List[str])
 def suggest_dataset_queries(dataset_id: int, db: Session = Depends(get_db)):
     db_dataset = _get_dataset_or_404(dataset_id, db)
-    df = dataset_service.get_dataset_df(db_dataset.file_path)
+    df = dataset_service.get_dataset_df(str(db_dataset.file_path))
     return nlp_service.suggest_queries(df)

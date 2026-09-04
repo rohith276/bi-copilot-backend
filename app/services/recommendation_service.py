@@ -1,59 +1,129 @@
 import pandas as pd
 import numpy as np
 from typing import List, Dict, Any, Optional
+import math
+
 
 def generate_recommendations(df: pd.DataFrame, product_col: str, sales_col: str, inventory_col: str) -> List[Dict[str, Any]]:
     """
-    Suggest business actions based on sales and inventory analysis.
+    Supply-Chain Operations Research & Inventory Action Engine:
+    - ABC Pareto Classification (Class A: 80% revenue, Class B: 15%, Class C: 5% long tail).
+    - Statistical Reorder Point (ROP) and safety stock buffer estimation.
+    - Liquidation & capital liberation recommendations for dormant/slow-moving inventory.
     """
     recommendations = []
     
-    # Work on a copy to avoid mutating the original
-    df = df.copy()
-    
-    # Ensure numeric types
-    df[sales_col] = pd.to_numeric(df[sales_col], errors='coerce')
-    df[inventory_col] = pd.to_numeric(df[inventory_col], errors='coerce')
-    
-    # Group by product to get aggregate stats
-    summary = df.groupby(product_col).agg({
-        sales_col: ['sum', 'mean'],
-        inventory_col: 'mean'
-    }).reset_index()
-    summary.columns = [product_col, 'total_sales', 'avg_sales', 'avg_inventory']
+    try:
+        working_df = df.copy()
+        
+        if product_col not in working_df.columns:
+            return []
+            
+        # Clean numeric fields
+        for col in [sales_col, inventory_col]:
+            if col in working_df.columns:
+                if working_df[col].dtype == 'object':
+                    working_df[col] = working_df[col].astype(str).str.replace(r'[$,£€ ]', '', regex=True)
+                working_df[col] = pd.to_numeric(working_df[col], errors='coerce')
+        
+        working_df = working_df.dropna(subset=[product_col, sales_col, inventory_col])
+        if len(working_df) < 5:
+            return []
 
-    # 1. Critical Restock: Sales > Inventory * 5 (assuming high velocity)
-    critical = summary[summary['total_sales'] > summary['avg_inventory'] * 2]
-    for _, row in critical.iterrows():
-        recommendations.append({
-            "product": str(row[product_col]),
-            "action": f"Critical Restock: {row[product_col]}",
-            "reason": f"Sales velocity ({row['total_sales']:.0f}) is outpacing inventory levels ({row['avg_inventory']:.0f}). High risk of stockout.",
-            "priority": "High"
-        })
-        
-    # 2. Promotional Opportunity: High inventory, low sales
-    stale = summary[(summary['avg_inventory'] > summary['total_sales'] * 3) & (summary['total_sales'] > 0)]
-    for _, row in stale.iterrows():
-        recommendations.append({
-            "product": str(row[product_col]),
-            "action": f"Launch Promotion for {row[product_col]}",
-            "reason": "High inventory holding costs with slow sales movement. Recommend 10-15% discount.",
-            "priority": "Medium"
-        })
-        
-    # 3. Top Performer: High sales, stable inventory
-    top = summary.nlargest(3, 'total_sales')
-    for _, row in top.iterrows():
-        if not any(r['product'] == str(row[product_col]) for r in recommendations):
+        # Find date column if present to calculate true daily velocity
+        date_cols = [c for c in working_df.columns if 'date' in c.lower()]
+        days_span = 90  # Default 90-day window
+        if date_cols:
+            try:
+                d_series = pd.to_datetime(working_df[date_cols[0]], errors='coerce').dropna()
+                if len(d_series) > 1:
+                    span = (d_series.max() - d_series.min()).days
+                    if span > 10:
+                        days_span = span
+            except Exception:
+                pass
+
+        # Aggregate product statistics
+        summary = working_df.groupby(product_col).agg(
+            total_sales=(sales_col, 'sum'),
+            total_qty=(inventory_col, 'sum'),
+            avg_qty=(inventory_col, 'mean'),
+            std_qty=(inventory_col, 'std'),
+            order_count=(sales_col, 'count'),
+            avg_ticket=(sales_col, 'mean')
+        ).reset_index()
+
+        summary['std_qty'] = summary['std_qty'].fillna(1.0)
+        total_portfolio_sales = summary['total_sales'].sum()
+        if total_portfolio_sales <= 0:
+            return []
+
+        # 1. ABC Pareto Segmentation
+        summary = summary.sort_values(by='total_sales', ascending=False)
+        summary['cum_sales'] = summary['total_sales'].cumsum()
+        summary['cum_pct'] = summary['cum_sales'] / total_portfolio_sales
+
+        def assign_abc(row):
+            if row['cum_pct'] <= 0.80 or row.name in summary.index[:5]:
+                return 'Class A'
+            elif row['cum_pct'] <= 0.95:
+                return 'Class B'
+            return 'Class C'
+
+        summary['abc_class'] = summary.apply(assign_abc, axis=1)
+
+        # 2. Generate Action Specs
+        # Class A: Critical Replenishment & Stockout Prevention (Top 80% of revenue)
+        class_a = summary[summary['abc_class'] == 'Class A'].head(10)
+        for _, row in class_a.iterrows():
+            daily_run_rate = row['total_qty'] / max(days_span, 1)
+            # Standard 14-day lead time with 95% service level buffer (Z=1.65)
+            lead_time_days = 14
+            safety_stock = math.ceil(1.65 * row['std_qty'] * math.sqrt(lead_time_days / 7))
+            reorder_units = math.ceil(daily_run_rate * 30 + safety_stock)
+            
             recommendations.append({
                 "product": str(row[product_col]),
-                "action": f"Maintain Premium Placement for {row[product_col]}",
-                "reason": "Generating significant revenue. Ensure prime visibility in marketing channels.",
-                "priority": "Low"
+                "action": f"Critical Restock: {reorder_units} units (Class A)",
+                "reason": f"Top revenue driver (${row['total_sales']:,.2f}, {row['order_count']} orders). Velocity: {daily_run_rate:.1f} units/day. Protect safety stock ({safety_stock} units).",
+                "priority": "High",
+                "category": "Class A (Revenue Driver)",
+                "velocity": round(float(daily_run_rate), 2),
+                "recommended_units": float(reorder_units)
             })
-        
-    return recommendations
+
+        # Class C: Slow Movers & Capital Liberation (Bottom 5% of portfolio)
+        class_c = summary[summary['abc_class'] == 'Class C'].tail(8)
+        for _, row in class_c.iterrows():
+            recommendations.append({
+                "product": str(row[product_col]),
+                "action": f"Liquidation / Discount for {row[product_col]} (Class C)",
+                "reason": f"Low volume velocity (${row['total_sales']:,.2f} total across {row['order_count']} orders). Recommend 15-20% promotional discount to liberate tied-up capital.",
+                "priority": "Medium",
+                "category": "Class C (Slow Mover)",
+                "velocity": round(float(row['total_qty'] / max(days_span, 1)), 2),
+                "recommended_units": 0.0
+            })
+
+        # Top Margin / Strategic Anchors
+        top_ticket = summary.nlargest(3, 'avg_ticket')
+        for _, row in top_ticket.iterrows():
+            if not any(r['product'] == str(row[product_col]) for r in recommendations):
+                recommendations.append({
+                    "product": str(row[product_col]),
+                    "action": f"Premium Marketing Placement for {row[product_col]}",
+                    "reason": f"Highest transaction ticket size (${row['avg_ticket']:,.2f}/order). High gross margin potential — prioritize in marketing campaigns.",
+                    "priority": "Low",
+                    "category": "Strategic Anchor",
+                    "velocity": round(float(row['total_qty'] / max(days_span, 1)), 2),
+                    "recommended_units": float(math.ceil(row['total_qty'] * 0.2))
+                })
+
+        return recommendations[:20]
+
+    except Exception as e:
+        return []
+
 
 def analyze_business_health(df: pd.DataFrame) -> Dict[str, Any]:
     """
@@ -68,9 +138,9 @@ def analyze_business_health(df: pd.DataFrame) -> Dict[str, Any]:
         duplicate_pct = (df.duplicated().sum() / len(df)) * 100 if len(df) > 0 else 0
         
         # Find numeric columns and compute real stats
-        numeric_cols = df.select_dtypes(include=[np.number]).columns
+        numeric_cols = df.select_dtypes(include="number").columns
         
-        health_details = {
+        health_details: Dict[str, Any] = {
             "total_rows": len(df),
             "total_columns": len(df.columns),
             "numeric_columns": len(numeric_cols),
@@ -82,7 +152,7 @@ def analyze_business_health(df: pd.DataFrame) -> Dict[str, Any]:
         # Identify the highest-value numeric column as the primary metric
         if len(numeric_cols) > 0:
             col_sums = {col: round(float(df[col].sum()), 2) for col in numeric_cols}
-            primary_col = max(col_sums, key=col_sums.get)
+            primary_col = max(col_sums.keys(), key=lambda k: col_sums[k])
             health_details["primary_metric"] = primary_col
             health_details["primary_metric_total"] = col_sums[primary_col]
 
