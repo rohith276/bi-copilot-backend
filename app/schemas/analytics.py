@@ -45,7 +45,17 @@ class VisualQueryRequest(BaseModel):
     y_axis: str
     aggregate: str
     filters: Optional[List[Dict[str, Any]]] = None
+    date_granularity: Optional[str] = None      # "day" | "week" | "month" | "quarter" | "year"
+    sort_order: Optional[str] = None            # "asc" | "desc" (by agg value)
+    limit: Optional[int] = None                 # Top N / Bottom N
+    range_min: Optional[str] = None             # Min value or date string for X-axis range
+    range_max: Optional[str] = None             # Max value or date string for X-axis range
+    chart_type: Optional[str] = None            # Hint for smart auto-limits
 
 class VisualQueryResult(BaseModel):
     sql_query: str
     result: QueryResult
+    x_column_type: Optional[str] = None         # "date" | "string" | "numeric"
+    available_range: Optional[Dict[str, str]] = None  # {"min": "...", "max": "..."}
+    applied_granularity: Optional[str] = None   # The granularity that was actually applied
+

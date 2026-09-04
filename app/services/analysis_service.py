@@ -20,6 +20,10 @@ def process_query(df: pd.DataFrame, request: QueryRequest) -> Dict[str, Any]:
                 processed_df = processed_df[processed_df[f.column] > f.value]
             elif f.operator == "lt":
                 processed_df = processed_df[processed_df[f.column] < f.value]
+            elif f.operator == "gte":
+                processed_df = processed_df[processed_df[f.column] >= f.value]
+            elif f.operator == "lte":
+                processed_df = processed_df[processed_df[f.column] <= f.value]
             elif f.operator == "contains":
                 processed_df = processed_df[processed_df[f.column].astype(str).str.contains(str(f.value), case=False)]
 
@@ -29,7 +33,7 @@ def process_query(df: pd.DataFrame, request: QueryRequest) -> Dict[str, Any]:
         valid_agg_funcs = {}
         for col, func in request.group_by.agg_funcs.items():
             if col in processed_df.columns:
-                normalized_func = str(func).lower()
+                normalized_func = func.lower()
                 if normalized_func != "count":
                     processed_df.loc[:, col] = pd.to_numeric(processed_df[col], errors='coerce')
                 valid_agg_funcs[col] = normalized_func
@@ -72,10 +76,10 @@ def calculate_kpis(df: pd.DataFrame, numeric_columns: List[str]) -> Dict[str, An
     for col in numeric_columns:
         if col in df.columns:
             kpis[col] = {
-                "sum": float(df[col].sum()),
-                "mean": float(df[col].mean()),
-                "max": float(df[col].max()),
-                "min": float(df[col].min()),
-                "count": int(df[col].count())
+                "sum": df[col].sum(),
+                "mean": df[col].mean(),
+                "max": df[col].max(),
+                "min": df[col].min(),
+                "count": df[col].count()
             }
     return kpis
